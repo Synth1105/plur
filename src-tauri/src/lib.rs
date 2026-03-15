@@ -1200,6 +1200,7 @@ fn write_chromium_extension(
 
     copy_or_empty(css_path, &target_css)?;
     copy_or_empty(js_path, &target_js)?;
+    write_popup_files(ext_dir)?;
 
     Ok(())
 }
@@ -1219,6 +1220,7 @@ fn write_firefox_extension(
 
     copy_or_empty(css_path, &target_css)?;
     copy_or_empty(js_path, &target_js)?;
+    write_popup_files(ext_dir)?;
 
     let xpi_path = ext_dir.join("plur-firefox.xpi");
     create_xpi(ext_dir, &xpi_path)?;
@@ -1231,7 +1233,14 @@ fn create_xpi(ext_dir: &Path, xpi_path: &Path) -> std::io::Result<()> {
     let mut zip = ZipWriter::new(file);
     let options = FileOptions::default();
 
-    for name in ["manifest.json", "result.css", "result.js"] {
+    for name in [
+        "manifest.json",
+        "result.css",
+        "result.js",
+        "popup.html",
+        "popup.css",
+        "popup.js",
+    ] {
         let path = ext_dir.join(name);
         let data = fs::read(&path).unwrap_or_default();
         zip.start_file(name, options)?;
@@ -1257,6 +1266,11 @@ fn manifest_json_chromium(theme: &serde_json::Value) -> String {
         "name": "Plur Mod Injector",
         "version": "0.1.0",
         "description": "Injects plur result.css and result.js",
+        "action": {
+            "default_popup": "popup.html",
+            "default_title": "Plur"
+        },
+        "permissions": ["activeTab"],
         "content_scripts": [
             {
                 "matches": ["<all_urls>"],
@@ -1280,10 +1294,15 @@ fn manifest_json_firefox() -> String {
   "name": "Plur Mod Injector",
   "version": "0.1.0",
   "description": "Injects plur result.css and result.js",
+  "permissions": ["activeTab"],
   "applications": {{
     "gecko": {{
       "id": "{ext_id}"
     }}
+  }},
+  "browser_action": {{
+    "default_popup": "popup.html",
+    "default_title": "Plur"
   }},
   "content_scripts": [
     {{
@@ -1297,6 +1316,106 @@ fn manifest_json_firefox() -> String {
 "#,
         ext_id = FIREFOX_EXTENSION_ID
     )
+}
+
+fn write_popup_files(ext_dir: &Path) -> std::io::Result<()> {
+    fs::write(ext_dir.join("popup.html"), popup_html())?;
+    fs::write(ext_dir.join("popup.css"), popup_css())?;
+    fs::write(ext_dir.join("popup.js"), popup_js())?;
+    Ok(())
+}
+
+fn popup_html() -> String {
+    r#"<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>Plur</title>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Plur</h1>
+      <p>Result styles and scripts are active on this tab.</p>
+      <button id="reload">Reload Current Tab</button>
+      <div class="hint">
+        UI styles for Firefox require userChrome and a restart.
+      </div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
+"#
+    .to_string()
+}
+
+fn popup_css() -> String {
+    r#":root {
+  color-scheme: light;
+  font-family: "SF Pro Text", "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 12px;
+  background: #f2f4f6;
+  color: #1d232a;
+  width: 240px;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+
+h1 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+p {
+  font-size: 12px;
+  margin: 0 0 12px;
+  color: #4b5563;
+}
+
+button {
+  width: 100%;
+  border: none;
+  border-radius: 999px;
+  background: #1f2937;
+  color: #ffffff;
+  padding: 8px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hint {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #6b7280;
+}
+"#
+    .to_string()
+}
+
+fn popup_js() -> String {
+    r#"const button = document.getElementById("reload");
+if (button) {
+  button.addEventListener("click", () => {
+    const api = typeof browser !== "undefined" ? browser : chrome;
+    api.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs[0] && tabs[0].id) {
+        api.tabs.reload(tabs[0].id);
+      }
+    });
+  });
+}
+"#
+    .to_string()
 }
 
 fn load_theme_json(path: &Path) -> Option<serde_json::Value> {
